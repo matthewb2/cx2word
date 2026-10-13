@@ -1,0 +1,21 @@
+# Visual Studio
+.vs/
+CX2Word/bin/
+CX2Word/obj/
+
+# Rider
+.idea/
+
+# User files
+*.user
+*.suo
+
+# Logs
+*.log
+
+# NuGet
+packages/
+
+# Windows
+Thumbs.db
+Desktop.ini
