@@ -259,11 +259,8 @@ internal sealed class FixedWidthTextMeasurer : ITextMeasurer
     public float LineHeight { get; set; } = 20f;
     public float Ascent { get; init; } = 16f;
 
-    private readonly Font _font = new("Arial", 12f);
-
     public float MeasureWidth(string text, TextStyle style) => text.Length * CharWidth;
     public float MeasureCharWidth(char ch, TextStyle style) => CharWidth;
     public float GetLineHeight(TextStyle style) => LineHeight;
     public float GetAscent(TextStyle style) => Ascent;
-    public Font GetFont(TextStyle style) => _font;
 }

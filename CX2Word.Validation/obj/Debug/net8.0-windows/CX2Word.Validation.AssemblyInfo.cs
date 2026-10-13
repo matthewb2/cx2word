@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("CX2Word.Validation")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+0436985160674202aa5df670c33eb3b85d94d1f3")]
 [assembly: System.Reflection.AssemblyProductAttribute("CX2Word.Validation")]
 [assembly: System.Reflection.AssemblyTitleAttribute("CX2Word.Validation")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

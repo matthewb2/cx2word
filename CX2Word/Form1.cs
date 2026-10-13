@@ -1,12 +1,11 @@
 using System.Drawing;
-using System.Drawing.Text;
 using System.Windows.Forms;
 
 namespace CX2Word
 {
     public partial class Form1 : Form
     {
-        private readonly GdiTextMeasurer _measurer;
+        private readonly DirectWriteTextMeasurer _measurer;
         private readonly LayoutSettings _settings;
         private readonly EditorSession _session;
         private readonly DocumentRenderer _renderer;
@@ -20,15 +19,16 @@ namespace CX2Word
         {
             InitializeComponent();
 
-            DoubleBuffered = true;
+            DoubleBuffered = false;
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.Opaque | ControlStyles.UserPaint, true);
             KeyPreview = true;
             Text = "CX2Word - 구조적 워드프로세서";
             BackColor = Color.FromArgb(0x5F, 0x5F, 0x5F);
             AutoScroll = true;
 
-            _measurer = new GdiTextMeasurer();
+            _measurer = new DirectWriteTextMeasurer();
             _settings = new LayoutSettings();
-            _renderer = new DocumentRenderer(_measurer);
+            _renderer = new DocumentRenderer(_measurer, this);
 
             var engine = new LayoutEngine(_measurer);
             var document = Document.CreateSample();
@@ -139,16 +139,17 @@ namespace CX2Word
 
         protected override void OnPaint(PaintEventArgs e)
         {
-            base.OnPaint(e);
-            if (!_initialized || _session is null) return;
-            e.Graphics.TranslateTransform(AutoScrollPosition.X, AutoScrollPosition.Y);
-            _renderer.Render(e.Graphics, _session, _caretVisible, PageLeft);
+            if (!_initialized || _session is null || _session.Layout is null) return;
+
+            _renderer.EnsureInitialized();
+            _renderer.Render(_session, _caretVisible, PageLeft, AutoScrollPosition.X, AutoScrollPosition.Y);
         }
 
         protected override void OnResize(EventArgs e)
         {
             base.OnResize(e);
             if (!_initialized) return;
+            _renderer.Resize(Math.Max(ClientSize.Width, 1), Math.Max(ClientSize.Height, 1));
             UpdateScrollSize();
             Invalidate();
         }

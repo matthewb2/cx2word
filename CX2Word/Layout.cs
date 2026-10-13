@@ -1,5 +1,6 @@
 ﻿using System.Drawing;
-using System.Drawing.Text;
+using Vortice.DirectWrite;
+using static Vortice.DirectWrite.DWrite;
 
 namespace CX2Word
 {
@@ -18,43 +19,46 @@ namespace CX2Word
         float MeasureCharWidth(char ch, TextStyle style);
         float GetLineHeight(TextStyle style);
         float GetAscent(TextStyle style);
-        Font GetFont(TextStyle style);
     }
 
-    /// <summary>GDI+ backed measurer. Uses the very same StringFormat for measuring and (later) drawing.</summary>
-    public sealed class GdiTextMeasurer : ITextMeasurer, IDisposable
+    /// <summary>DirectWrite-backed measurer. The formats it creates are directly usable by the D2D renderer.</summary>
+    public sealed class DirectWriteTextMeasurer : ITextMeasurer, IDisposable
     {
-        private readonly Bitmap _probe;
-        private readonly Graphics _g;
-        private readonly StringFormat _format;
-        private readonly Dictionary<TextStyle, Font> _fonts = new();
-        private readonly Dictionary<(TextStyle, char), float> _charWidths = new();
+        private const float LayoutWidth = 100000f;
 
-        public GdiTextMeasurer()
+        private readonly IDWriteFactory _factory;
+        private readonly Dictionary<TextStyle, IDWriteTextFormat> _formats = new();
+        private readonly Dictionary<(TextStyle, char), float> _charWidths = new();
+        private readonly Dictionary<TextStyle, float> _lineHeights = new();
+
+        public DirectWriteTextMeasurer()
         {
-            _probe = new Bitmap(1, 1);
-            _g = Graphics.FromImage(_probe);
-            _g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
-            _format = new StringFormat(StringFormat.GenericTypographic)
-            {
-                FormatFlags = StringFormatFlags.MeasureTrailingSpaces | StringFormatFlags.NoClip
-            };
+            _factory = DWriteCreateFactory<IDWriteFactory>();
         }
 
-        public Font GetFont(TextStyle style)
+        public IDWriteFactory WriteFactory => _factory;
+
+        public IDWriteTextFormat GetFormat(TextStyle style)
         {
-            if (!_fonts.TryGetValue(style, out var font))
+            if (!_formats.TryGetValue(style, out var format))
             {
-                font = new Font(style.FontFamily, style.FontSize, style.FontStyle, GraphicsUnit.Pixel);
-                _fonts[style] = font;
+                format = _factory.CreateTextFormat(
+                    style.FontFamily,
+                    (style.FontStyle & System.Drawing.FontStyle.Bold) != 0 ? Vortice.DirectWrite.FontWeight.Bold : Vortice.DirectWrite.FontWeight.Normal,
+                    (style.FontStyle & System.Drawing.FontStyle.Italic) != 0 ? Vortice.DirectWrite.FontStyle.Italic : Vortice.DirectWrite.FontStyle.Normal,
+                    Vortice.DirectWrite.FontStretch.Normal,
+                    style.FontSize);
+                _formats[style] = format;
             }
-            return font;
+            return format;
         }
 
         public float MeasureWidth(string text, TextStyle style)
         {
             if (string.IsNullOrEmpty(text)) return 0f;
-            return _g.MeasureString(text, GetFont(style), new PointF(0, 0), _format).Width;
+
+            using var layout = _factory.CreateTextLayout(text, GetFormat(style), LayoutWidth, LayoutWidth);
+            return layout.Metrics.WidthIncludingTrailingWhitespace;
         }
 
         public float MeasureCharWidth(char ch, TextStyle style)
@@ -63,27 +67,29 @@ namespace CX2Word
             if (_charWidths.TryGetValue(key, out var width))
                 return width;
 
-            width = _g.MeasureString(ch.ToString(), GetFont(style), new PointF(0, 0), _format).Width;
+            using var layout = _factory.CreateTextLayout(ch.ToString(), GetFormat(style), LayoutWidth, LayoutWidth);
+            width = layout.Metrics.WidthIncludingTrailingWhitespace;
             _charWidths[key] = width;
             return width;
         }
 
-        public float GetLineHeight(TextStyle style) => GetFont(style).GetHeight(_g);
-
-        public float GetAscent(TextStyle style)
+        public float GetLineHeight(TextStyle style)
         {
-            var font = GetFont(style);
-            float emHeight = font.FontFamily.GetEmHeight(font.Style);
-            float cellAscent = font.FontFamily.GetCellAscent(font.Style);
-            return font.Size * cellAscent / emHeight;
+            if (_lineHeights.TryGetValue(style, out var height))
+                return height;
+
+            using var layout = _factory.CreateTextLayout("K에9", GetFormat(style), LayoutWidth, LayoutWidth);
+            height = layout.Metrics.Height;
+            _lineHeights[style] = height;
+            return height;
         }
+
+        public float GetAscent(TextStyle style) => GetLineHeight(style) * 0.72f;
 
         public void Dispose()
         {
-            foreach (var font in _fonts.Values) font.Dispose();
-            _format.Dispose();
-            _g.Dispose();
-            _probe.Dispose();
+            foreach (var format in _formats.Values) format.Dispose();
+            _formats.Clear();
         }
     }
 

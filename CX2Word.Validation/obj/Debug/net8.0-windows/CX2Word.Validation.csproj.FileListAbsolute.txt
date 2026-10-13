@@ -19,3 +19,14 @@ C:\Users\user\source\repos\CX2Word\CX2Word.Validation\obj\Debug\net8.0-windows\r
 C:\Users\user\source\repos\CX2Word\CX2Word.Validation\obj\Debug\net8.0-windows\CX2Word.Validation.pdb
 C:\Users\user\source\repos\CX2Word\CX2Word.Validation\obj\Debug\net8.0-windows\CX2Word.Validation.genruntimeconfig.cache
 C:\Users\user\source\repos\CX2Word\CX2Word.Validation\obj\Debug\net8.0-windows\ref\CX2Word.Validation.dll
+C:\Users\user\source\repos\CX2Word\CX2Word.Validation\bin\Debug\net8.0-windows\SharpGen.Runtime.dll
+C:\Users\user\source\repos\CX2Word\CX2Word.Validation\bin\Debug\net8.0-windows\SharpGen.Runtime.COM.dll
+C:\Users\user\source\repos\CX2Word\CX2Word.Validation\bin\Debug\net8.0-windows\System.IO.Pipelines.dll
+C:\Users\user\source\repos\CX2Word\CX2Word.Validation\bin\Debug\net8.0-windows\System.Text.Encodings.Web.dll
+C:\Users\user\source\repos\CX2Word\CX2Word.Validation\bin\Debug\net8.0-windows\System.Text.Json.dll
+C:\Users\user\source\repos\CX2Word\CX2Word.Validation\bin\Debug\net8.0-windows\Vortice.Direct2D1.dll
+C:\Users\user\source\repos\CX2Word\CX2Word.Validation\bin\Debug\net8.0-windows\Vortice.DirectX.dll
+C:\Users\user\source\repos\CX2Word\CX2Word.Validation\bin\Debug\net8.0-windows\Vortice.DXGI.dll
+C:\Users\user\source\repos\CX2Word\CX2Word.Validation\bin\Debug\net8.0-windows\Vortice.Mathematics.dll
+C:\Users\user\source\repos\CX2Word\CX2Word.Validation\bin\Debug\net8.0-windows\runtimes\browser\lib\net8.0\System.Text.Encodings.Web.dll
+C:\Users\user\source\repos\CX2Word\CX2Word.Validation\obj\Debug\net8.0-windows\CX2Word.Validation.sourcelink.json

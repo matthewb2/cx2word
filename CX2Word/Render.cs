@@ -1,60 +1,112 @@
 ﻿using System.Drawing;
-using System.Drawing.Text;
+using System.Numerics;
+using Vortice.Direct2D1;
+using Vortice.DirectWrite;
+using Vortice.Mathematics;
+using static Vortice.Direct2D1.D2D1;
+using Color = System.Drawing.Color;
 
 namespace CX2Word
 {
     /// <summary>
     /// View layer (AbiWord equivalent: fp_View). Draws the document strictly from
-    /// the derived DocumentLayout; it holds no layout state of its own.
+    /// the derived DocumentLayout with Direct2D + DirectWrite; it holds no layout state.
     /// </summary>
     public sealed class DocumentRenderer : IDisposable
     {
-        private readonly ITextMeasurer _measurer;
-        private readonly StringFormat _format;
-        private readonly Dictionary<int, Brush> _brushes = new();
-        private readonly Font _footerFont = new("Segoe UI", 9f);
+        private readonly DirectWriteTextMeasurer _measurer;
+        private readonly Control _control;
+
+        private ID2D1Factory? _factory;
+        private ID2D1HwndRenderTarget? _target;
+        private ID2D1SolidColorBrush? _pageBrush;
+        private ID2D1SolidColorBrush? _borderBrush;
+        private ID2D1SolidColorBrush? _footerBrush;
+        private ID2D1SolidColorBrush? _selectionBrush;
+        private ID2D1SolidColorBrush? _caretBrush;
+        private IDWriteTextFormat? _footerFormat;
+        private readonly Dictionary<int, ID2D1SolidColorBrush> _ownedBrushes = new();
 
         public Color PageBackColor { get; set; } = Color.White;
         public Color PageBorderColor { get; set; } = Color.FromArgb(0xC8, 0xC8, 0xC8);
         public Color SelectionColor { get; set; } = Color.FromArgb(90, 0, 120, 215);
+        public Color CaretColor { get; set; } = Color.Black;
 
-        public DocumentRenderer(ITextMeasurer measurer)
+        public DocumentRenderer(DirectWriteTextMeasurer measurer, Control control)
         {
             _measurer = measurer;
-            _format = new StringFormat(StringFormat.GenericTypographic)
-            {
-                FormatFlags = StringFormatFlags.MeasureTrailingSpaces | StringFormatFlags.NoClip
-            };
+            _control = control;
         }
 
-        public void Render(Graphics g, EditorSession session, bool caretVisible, float pageLeft)
+        /// <summary>Creates the D2D/DWrite resources lazily on first paint, or recreates after device loss.</summary>
+        public void EnsureInitialized()
         {
-            var layout = session.Layout;
-            g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+            if (_target != null) return;
 
-            DrawPages(g, layout, pageLeft);
-            DrawSelection(g, session, pageLeft);
-            DrawText(g, layout, pageLeft);
-            DrawCaret(g, session, caretVisible, pageLeft);
+            _factory = D2D1CreateFactory<ID2D1Factory>();
+            _target = _factory.CreateHwndRenderTarget(
+                new RenderTargetProperties(),
+                new HwndRenderTargetProperties
+                {
+                    Hwnd = _control.Handle,
+                    PixelSize = new SizeI(Math.Max(_control.ClientSize.Width, 1), Math.Max(_control.ClientSize.Height, 1))
+                });
+
+            _pageBrush = _target.CreateSolidColorBrush(ToColor4(PageBackColor));
+            _borderBrush = _target.CreateSolidColorBrush(ToColor4(PageBorderColor));
+            _footerBrush = _target.CreateSolidColorBrush(ToColor4(Color.FromArgb(0x66, 0x66, 0x66)));
+            _selectionBrush = _target.CreateSolidColorBrush(ToColor4(SelectionColor));
+            _caretBrush = _target.CreateSolidColorBrush(ToColor4(CaretColor));
+            _footerFormat = _measurer.WriteFactory.CreateTextFormat("Segoe UI", 9f);
         }
 
-        private void DrawPages(Graphics g, DocumentLayout layout, float pageLeft)
+        public void Resize(int width, int height)
         {
+            _target?.Resize(new SizeI(Math.Max(width, 1), Math.Max(height, 1)));
+        }
+
+        /// <param name="pageLeft">Horizontal offset of the document space origin (centered page).</param>
+        public void Render(EditorSession session, bool caretVisible, float pageLeft, int scrollX, int scrollY)
+        {
+            if (_target is null) return;
+
+            _target.BeginDraw();
+            _target.Clear(ToColor4(Color.FromArgb(0x5F, 0x5F, 0x5F)));
+            _target.Transform = Matrix3x2.CreateTranslation(pageLeft + scrollX, scrollY);
+
+            DrawPages(session.Layout);
+            DrawSelection(session);
+            DrawText(session.Layout);
+            DrawCaret(session, caretVisible);
+
+            _target.Transform = Matrix3x2.Identity;
+
+            var result = _target.EndDraw();
+            if (result.Failure) DisposeResources();
+        }
+
+        private void DrawPages(DocumentLayout layout)
+        {
+            if (_target is null || _pageBrush is null || _borderBrush is null || _footerBrush is null || _footerFormat is null)
+                return;
+
             foreach (var page in layout.Pages)
             {
-                var rect = new RectangleF(pageLeft + page.Left, page.Top, page.Width, page.Height);
-                g.FillRectangle(Brushes.White, rect);
-                g.DrawRectangle(Pens.Gainsboro, rect.X, rect.Y, rect.Width, rect.Height);
+                var rect = new Rect(page.Left, page.Top, page.Left + page.Width, page.Top + page.Height);
+                _target.FillRectangle(rect, _pageBrush);
+                _target.DrawRectangle(rect, _borderBrush, 1f);
 
                 string footer = $"Page {page.Index + 1} / {layout.Pages.Count}";
-                var size = g.MeasureString(footer, _footerFont);
-                g.DrawString(footer, _footerFont, Brushes.Gray,
-                    rect.X + (rect.Width - size.Width) / 2f, rect.Bottom - 32f);
+                using var footerLayout = _measurer.WriteFactory.CreateTextLayout(footer, _footerFormat, 100000f, 40f);
+                float fx = page.Left + (page.Width - footerLayout.Metrics.WidthIncludingTrailingWhitespace) / 2f;
+                _target.DrawTextLayout(new Vector2(fx, page.Top + page.Height - 32f), footerLayout, _footerBrush);
             }
         }
 
-        private void DrawText(Graphics g, DocumentLayout layout, float pageLeft)
+        private void DrawText(DocumentLayout layout)
         {
+            if (_target is null) return;
+
             foreach (var page in layout.Pages)
             {
                 foreach (var line in page.Lines)
@@ -62,25 +114,22 @@ namespace CX2Word
                     foreach (var run in line.Runs)
                     {
                         if (run.Text.Length == 0) continue;
-                        g.DrawString(
-                            run.Text,
-                            _measurer.GetFont(run.Style),
-                            GetBrush(run.Style.Color),
-                            pageLeft + line.X + run.X,
-                            line.Top,
-                            _format);
+
+                        using var textLayout = _measurer.WriteFactory.CreateTextLayout(
+                            run.Text, _measurer.GetFormat(run.Style), 100000f, line.Height);
+
+                        _target.DrawTextLayout(new Vector2(line.X + run.X, line.Top), textLayout, GetTextBrush(run.Style.Color));
                     }
                 }
             }
         }
 
-        private void DrawSelection(Graphics g, EditorSession session, float pageLeft)
+        private void DrawSelection(EditorSession session)
         {
-            if (!session.Caret.HasSelection) return;
+            if (_target is null || _selectionBrush is null || !session.Caret.HasSelection) return;
 
             var (start, end) = session.GetSelection();
             var layout = session.Layout;
-            using var brush = new SolidBrush(SelectionColor);
 
             foreach (var line in layout.Lines)
             {
@@ -96,36 +145,63 @@ namespace CX2Word
 
                 float x1 = layout.GetCaretX(line, a - line.Start);
                 float x2 = layout.GetCaretX(line, b - line.Start);
-                g.FillRectangle(brush, pageLeft + x1, line.Top, x2 - x1, line.Height);
+                _target.FillRectangle(new Rect(x1, line.Top, x2, line.Bottom), _selectionBrush);
             }
         }
 
-        private void DrawCaret(Graphics g, EditorSession session, bool caretVisible, float pageLeft)
+        private void DrawCaret(EditorSession session, bool caretVisible)
         {
-            if (!caretVisible) return;
+            if (_target is null || _caretBrush is null || !caretVisible) return;
 
             var bounds = session.Layout.GetCaretBounds(session.Caret.Position, session.Caret.Affinity);
             if (bounds == RectangleF.Empty) return;
 
-            g.DrawLine(Pens.Black, pageLeft + bounds.X, bounds.Y + 1f, pageLeft + bounds.X, bounds.Bottom - 1f);
+            _target.DrawLine(
+                new Vector2(bounds.X, bounds.Y + 1f),
+                new Vector2(bounds.X, bounds.Bottom - 1f),
+                _caretBrush, 1.5f);
         }
 
-        private Brush GetBrush(Color color)
+        private ID2D1SolidColorBrush GetTextBrush(Color color)
         {
+            if (_target is null) throw new InvalidOperationException();
+
             int key = color.ToArgb();
-            if (!_brushes.TryGetValue(key, out var brush))
-            {
-                brush = new SolidBrush(color);
-                _brushes[key] = brush;
-            }
-            return brush;
+            if (_ownedBrushes.TryGetValue(key, out var brush))
+                return brush;
+
+            var created = _target.CreateSolidColorBrush(ToColor4(color));
+            _ownedBrushes[key] = created;
+            return created;
         }
 
-        public void Dispose()
+        private static Color4 ToColor4(Color c) => new(c.R / 255f, c.G / 255f, c.B / 255f, c.A / 255f);
+
+        private void DisposeResources()
         {
-            _format.Dispose();
-            _footerFont.Dispose();
-            foreach (var brush in _brushes.Values) brush.Dispose();
+            _footerFormat?.Dispose();
+            _footerFormat = null;
+
+            _pageBrush?.Dispose();
+            _pageBrush = null;
+            _borderBrush?.Dispose();
+            _borderBrush = null;
+            _footerBrush?.Dispose();
+            _footerBrush = null;
+            _selectionBrush?.Dispose();
+            _selectionBrush = null;
+            _caretBrush?.Dispose();
+            _caretBrush = null;
+
+            foreach (var brush in _ownedBrushes.Values) brush.Dispose();
+            _ownedBrushes.Clear();
+
+            _target?.Dispose();
+            _target = null;
+            _factory?.Dispose();
+            _factory = null;
         }
+
+        public void Dispose() => DisposeResources();
     }
 }
