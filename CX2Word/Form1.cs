@@ -12,54 +12,157 @@ namespace CX2Word
         private readonly KeyboardController _keyboard;
         private readonly MouseController _mouse;
         private readonly System.Windows.Forms.Timer _caretTimer;
+        private readonly Panel _viewport;
         private bool _caretVisible = true;
         private bool _initialized;
+        private float _zoom = 1f;
+        private StatusStrip? _statusStrip;
+        private ToolStripStatusLabel? _statusLabel;
+        private ToolStripStatusLabel? _zoomLabel;
+        private ToolStripButton? _zoomOutButton;
+        private ToolStripButton? _zoomInButton;
+
+        private const float MinZoom = 0.4f;
+        private const float MaxZoom = 4f;
+        private const float ZoomStep = 1.1f;
 
         public Form1()
         {
             InitializeComponent();
 
-            DoubleBuffered = false;
-            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.Opaque | ControlStyles.UserPaint, true);
             KeyPreview = true;
             Text = "CX2Word - 구조적 워드프로세서";
             BackColor = Color.FromArgb(0x5F, 0x5F, 0x5F);
-            AutoScroll = true;
 
             _measurer = new DirectWriteTextMeasurer();
             _settings = new LayoutSettings();
-            _renderer = new DocumentRenderer(_measurer, this);
+
+            _viewport = new DocumentViewport
+            {
+                Dock = DockStyle.Fill,
+                AutoScroll = true,
+                BackColor = Color.FromArgb(0x5F, 0x5F, 0x5F)
+            };
+
+            _renderer = new DocumentRenderer(_measurer, _viewport);
 
             var engine = new LayoutEngine(_measurer);
             var document = Document.CreateSample();
             var typeStyle = new TextStyle { FontFamily = "Malgun Gothic", FontSize = 14f };
 
             _session = new EditorSession(document, engine, _settings, typeStyle);
-            _session.Changed += (_, _) => { UpdateScrollSize(); EnsureCaretVisible(); Invalidate(); };
+            _session.Changed += (_, _) => { UpdateScrollSize(); EnsureCaretVisible(); UpdateStatusBar(); _viewport.Invalidate(); };
 
             _keyboard = new KeyboardController(_session);
             _mouse = new MouseController(_session, ScreenToDocument);
 
+            BuildStatusBar();
+
+            Controls.Add(_viewport);
+            Controls.Add(_statusStrip!);
+
             _caretTimer = new System.Windows.Forms.Timer { Interval = 530 };
-            _caretTimer.Tick += (_, _) => { _caretVisible = !_caretVisible; Invalidate(); };
+            _caretTimer.Tick += (_, _) => { _caretVisible = !_caretVisible; _viewport.Invalidate(); };
             _caretTimer.Start();
+
+            _viewport.Paint += (_, _) =>
+            {
+                if (_session.Layout is null) return;
+                _renderer.EnsureInitialized();
+                _renderer.Render(_session, _caretVisible, PageLeft, _viewport.AutoScrollPosition.X, _viewport.AutoScrollPosition.Y, _zoom);
+            };
+            _viewport.Resize += (_, _) =>
+            {
+                _renderer.Resize(_viewport.ClientSize.Width, _viewport.ClientSize.Height);
+                UpdateScrollSize();
+                _viewport.Invalidate();
+            };
+            _viewport.Scroll += (_, _) => _viewport.Invalidate();
+
+            _viewport.MouseDown += OnViewportMouseDown;
+            _viewport.MouseMove += OnViewportMouseMove;
+            _viewport.MouseUp += OnViewportMouseUp;
+
+            Shown += (_, _) => { _viewport.Focus(); UpdateScrollSize(); UpdateZoomLabel(); UpdateStatusBar(); };
 
             _initialized = true;
             UpdateScrollSize();
+            UpdateZoomLabel();
+            UpdateStatusBar();
         }
 
-        private float PageLeft => Math.Max(24f, (ClientSize.Width - _settings.PageSize.Width) / 2f);
+        private float PageLeft => Math.Max(24f, (_viewport.ClientSize.Width - _settings.PageSize.Width * _zoom) / 2f);
 
         private PointF ScreenToDocument(Point client) =>
-            new(client.X - PageLeft - AutoScrollPosition.X, client.Y - AutoScrollPosition.Y);
+            new((client.X - PageLeft - _viewport.AutoScrollPosition.X) / _zoom, (client.Y - _viewport.AutoScrollPosition.Y) / _zoom);
+
+        // ------------------------------------------------------------ zoom
+
+        private void ZoomIn() => SetZoom(_zoom * ZoomStep);
+
+        private void ZoomOut() => SetZoom(_zoom / ZoomStep);
+
+        private void SetZoom(float zoom)
+        {
+            _zoom = Math.Clamp(zoom, MinZoom, MaxZoom);
+            UpdateZoomLabel();
+            UpdateScrollSize();
+            EnsureCaretVisible();
+            _viewport.Invalidate();
+        }
+
+        private void UpdateZoomLabel()
+        {
+            if (_zoomLabel is null) return;
+            _zoomLabel.Text = $"{Math.Round(_zoom * 100)}%";
+        }
+
+        // -------------------------------------------------------- status bar
+
+        private void BuildStatusBar()
+        {
+            _statusStrip = new StatusStrip { Dock = DockStyle.Bottom, SizingGrip = false };
+            _statusStrip.BackColor = Color.FromArgb(0xF0, 0xF0, 0xF0);
+            _statusStrip.ForeColor = Color.FromArgb(0x40, 0x40, 0x40);
+
+            _statusLabel = new ToolStripStatusLabel
+            {
+                Spring = true,
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+
+            _zoomOutButton = new ToolStripButton("-");
+            _zoomOutButton.Click += (_, _) => { ZoomOut(); _viewport.Focus(); };
+
+            _zoomLabel = new ToolStripStatusLabel
+            {
+                TextAlign = ContentAlignment.MiddleRight
+            };
+
+            _zoomInButton = new ToolStripButton("+");
+            _zoomInButton.Click += (_, _) => { ZoomIn(); _viewport.Focus(); };
+
+            _statusStrip.Items.Add(_statusLabel);
+            _statusStrip.Items.Add(_zoomOutButton);
+            _statusStrip.Items.Add(_zoomLabel);
+            _statusStrip.Items.Add(_zoomInButton);
+        }
+
+        private void UpdateStatusBar()
+        {
+            if (_statusLabel is null || _session is null || _session.Layout is null) return;
+
+            var layout = _session.Layout;
+            _statusLabel.Text = $"페이지 {layout.Pages.Count} · 줄 {layout.LineCount}";
+        }
 
         private void UpdateScrollSize()
         {
             if (!_initialized || _session is null || _session.Layout is null) return;
 
             var layout = _session.Layout;
-            float totalHeight = layout.Pages.Count > 0 ? layout.Pages[^1].Bottom : 0;
-            AutoScrollMinSize = new Size((int)_settings.PageSize.Width + 96, (int)(totalHeight + 48));
+            float totalHeight = (layout.Pages.Count > 0 ? layout.Pages[^1].Bottom : 0) * _zoom;
+            _viewport.AutoScrollMinSize = new Size((int)(_settings.PageSize.Width * _zoom) + 96, (int)(totalHeight + 48));
         }
 
         /// <summary>Keeps the caret on screen by scrolling the least possible amount.</summary>
@@ -72,18 +175,18 @@ namespace CX2Word
 
             const int margin = 24;
 
-            float left = bounds.X + PageLeft + AutoScrollPosition.X;
-            float top = bounds.Y + AutoScrollPosition.Y;
+            float left = bounds.X * _zoom + PageLeft + _viewport.AutoScrollPosition.X;
+            float top = bounds.Y * _zoom + _viewport.AutoScrollPosition.Y;
 
             int deltaX = 0, deltaY = 0;
             if (left < margin) deltaX = (int)(left - margin);
-            else if (left > ClientSize.Width - margin) deltaX = (int)(left - (ClientSize.Width - margin));
+            else if (left > _viewport.ClientSize.Width - margin) deltaX = (int)(left - (_viewport.ClientSize.Width - margin));
 
             if (top < margin) deltaY = (int)(top - margin);
-            else if (top > ClientSize.Height - margin) deltaY = (int)(top - (ClientSize.Height - margin));
+            else if (top > _viewport.ClientSize.Height - margin) deltaY = (int)(top - (_viewport.ClientSize.Height - margin));
 
             if (deltaX != 0 || deltaY != 0)
-                AutoScrollPosition = new Point(AutoScrollPosition.X - deltaX, AutoScrollPosition.Y - deltaY);
+                _viewport.AutoScrollPosition = new Point(_viewport.AutoScrollPosition.X - deltaX, _viewport.AutoScrollPosition.Y - deltaY);
         }
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
@@ -92,10 +195,16 @@ namespace CX2Word
             bool shift = (keyData & Keys.Shift) == Keys.Shift;
             bool control = (keyData & Keys.Control) == Keys.Control;
 
+            if (control)
+            {
+                if (key == Keys.Oemplus || key == Keys.Add) { ZoomIn(); return true; }
+                if (key == Keys.OemMinus || key == Keys.Subtract) { ZoomOut(); return true; }
+            }
+
             if (_keyboard.HandleKeyDown(key, shift, control))
             {
                 _caretVisible = true;
-                Invalidate();
+                _viewport.Invalidate();
                 return true;
             }
             return base.ProcessCmdKey(ref msg, keyData);
@@ -107,59 +216,40 @@ namespace CX2Word
             if (_keyboard.HandleKeyPress(e.KeyChar))
             {
                 _caretVisible = true;
-                Invalidate();
+                _viewport.Invalidate();
                 e.Handled = true;
             }
         }
 
-        protected override void OnMouseDown(MouseEventArgs e)
+        private void OnViewportMouseDown(object? sender, MouseEventArgs e)
         {
-            base.OnMouseDown(e);
-            Focus();
-            Capture = true;
+            _viewport.Focus();
+            _viewport.Capture = true;
             _mouse.OnMouseDown(e.Location, (ModifierKeys & Keys.Shift) == Keys.Shift);
             _caretVisible = true;
-            Invalidate();
+            _viewport.Invalidate();
         }
 
-        protected override void OnMouseMove(MouseEventArgs e)
+        private void OnViewportMouseMove(object? sender, MouseEventArgs e)
         {
-            base.OnMouseMove(e);
             if (!_mouse.IsDragging) return;
             _mouse.OnMouseMove(e.Location);
-            Invalidate();
+            _viewport.Invalidate();
         }
 
-        protected override void OnMouseUp(MouseEventArgs e)
+        private void OnViewportMouseUp(object? sender, MouseEventArgs e)
         {
-            base.OnMouseUp(e);
             _mouse.OnMouseUp();
-            Capture = false;
-        }
-
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            if (!_initialized || _session is null || _session.Layout is null) return;
-
-            _renderer.EnsureInitialized();
-            _renderer.Render(_session, _caretVisible, PageLeft, AutoScrollPosition.X, AutoScrollPosition.Y);
-        }
-
-        protected override void OnResize(EventArgs e)
-        {
-            base.OnResize(e);
-            if (!_initialized) return;
-            _renderer.Resize(Math.Max(ClientSize.Width, 1), Math.Max(ClientSize.Height, 1));
-            UpdateScrollSize();
-            Invalidate();
+            _viewport.Capture = false;
         }
 
         protected override void OnActivated(EventArgs e)
         {
             base.OnActivated(e);
+            _viewport.Focus();
             _caretTimer.Start();
             _caretVisible = true;
-            Invalidate();
+            _viewport.Invalidate();
         }
 
         protected override void OnDeactivate(EventArgs e)
@@ -167,7 +257,7 @@ namespace CX2Word
             base.OnDeactivate(e);
             _caretTimer.Stop();
             _caretVisible = false;
-            Invalidate();
+            _viewport.Invalidate();
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e)

@@ -66,13 +66,13 @@ namespace CX2Word
         }
 
         /// <param name="pageLeft">Horizontal offset of the document space origin (centered page).</param>
-        public void Render(EditorSession session, bool caretVisible, float pageLeft, int scrollX, int scrollY)
+        public void Render(EditorSession session, bool caretVisible, float pageLeft, int scrollX, int scrollY, float zoom)
         {
             if (_target is null) return;
 
             _target.BeginDraw();
             _target.Clear(ToColor4(Color.FromArgb(0x5F, 0x5F, 0x5F)));
-            _target.Transform = Matrix3x2.CreateTranslation(pageLeft + scrollX, scrollY);
+            _target.Transform = Matrix3x2.CreateScale(zoom) * Matrix3x2.CreateTranslation(pageLeft + scrollX, scrollY);
 
             DrawPages(session.Layout);
             DrawSelection(session);
@@ -92,7 +92,7 @@ namespace CX2Word
 
             foreach (var page in layout.Pages)
             {
-                var rect = new Rect(page.Left, page.Top, page.Left + page.Width, page.Top + page.Height);
+                var rect = new Rect(page.Left, page.Top, page.Width, page.Height);
                 _target.FillRectangle(rect, _pageBrush);
                 _target.DrawRectangle(rect, _borderBrush, 1f);
 
@@ -145,7 +145,7 @@ namespace CX2Word
 
                 float x1 = layout.GetCaretX(line, a - line.Start);
                 float x2 = layout.GetCaretX(line, b - line.Start);
-                _target.FillRectangle(new Rect(x1, line.Top, x2, line.Bottom), _selectionBrush);
+                _target.FillRectangle(new Rect(x1, line.Top, x2 - x1, line.Bottom - line.Top), _selectionBrush);
             }
         }
 

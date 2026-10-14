@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.Linq;
 using CX2Word;
 
 namespace CX2Word.Validation;
@@ -28,6 +29,7 @@ internal static class Program
         ValidateCaretGeometryRoundTrip();
         ValidateEditing();
         ValidateDeleteRangeAcrossParagraphs();
+        ValidateSelection();
 
         Console.WriteLine($"\n{_passed} passed, {_failed} failed");
         return _failed == 0 ? 0 : 1;
@@ -202,6 +204,58 @@ internal static class Program
         var pos = DocumentEditor.DeleteRange(doc, new TextPosition(0, 2), new TextPosition(1, 3));
         Check("edit: delete range across paragraphs", pos == new TextPosition(0, 2));
         Check("edit: delete range text result", doc.ParagraphCount == 2 && doc[0].Text == "abh" && doc[1].Text == "ijkl");
+    }
+
+    // ---------------------------------------------------------------- tests
+
+    private static void ValidateSelection()
+    {
+        var doc = new Document();
+        doc.AppendParagraph("aaaa bbbb cccc dddd", new TextStyle());
+        var layout = Layout(doc, contentWidth: 100, lineHeight: 20);
+        var session = new EditorSession(doc);
+        session.Caret.Anchor = new TextPosition(0, 0);
+        session.Caret.Position = new TextPosition(0, 5);
+
+        var (start, end) = session.GetSelection();
+        int rects = 0;
+        foreach (var line in layout.Lines)
+        {
+            if (line.ParagraphIndex < start.ParagraphIndex || line.ParagraphIndex > end.ParagraphIndex)
+                continue;
+            int from = line.ParagraphIndex == start.ParagraphIndex ? start.Offset : 0;
+            int to = line.ParagraphIndex == end.ParagraphIndex ? end.Offset : doc[line.ParagraphIndex].Length;
+            int a = Math.Max(from, line.Start);
+            int b = Math.Min(to, line.End);
+            if (b <= a) continue;
+            float x1 = layout.GetCaretX(line, a - line.Start);
+            float x2 = layout.GetCaretX(line, b - line.Start);
+            float w = x2 - x1;
+            float h = line.Bottom - line.Top;
+            rects++;
+            Check("selection: rect height == line.Height", Math.Abs(h - line.Height) < 0.0001f);
+            Check("selection: rect width > 0", w > 0);
+        }
+        Check("selection: produces rects for covered lines", rects > 0);
+
+        rects = 0;
+        session.Caret.Anchor = new TextPosition(0, 0);
+        session.Caret.Position = new TextPosition(0, 15);
+        var (s2, e2) = session.GetSelection();
+        foreach (var line in layout.Lines)
+        {
+            if (line.ParagraphIndex < s2.ParagraphIndex || line.ParagraphIndex > e2.ParagraphIndex)
+                continue;
+            int from = line.ParagraphIndex == s2.ParagraphIndex ? s2.Offset : 0;
+            int to = line.ParagraphIndex == e2.ParagraphIndex ? e2.Offset : doc[e2.ParagraphIndex].Length;
+            int a = Math.Max(from, line.Start);
+            int b = Math.Min(to, line.End);
+            if (b <= a) continue;
+            float h = line.Bottom - line.Top;
+            rects++;
+            Check("selection multi: rect height == line.Height for each line", Math.Abs(h - line.Height) < 0.0001f);
+        }
+        Check("selection multi: covers multiple lines", rects == layout.LineCount);
     }
 
     private static void ValidateEditing()
