@@ -213,7 +213,13 @@ internal static class Program
         var doc = new Document();
         doc.AppendParagraph("aaaa bbbb cccc dddd", new TextStyle());
         var layout = Layout(doc, contentWidth: 100, lineHeight: 20);
-        var session = new EditorSession(doc);
+        var session = new EditorSession(doc, new LayoutEngine(new FixedWidthTextMeasurer { LineHeight = 20 }), new LayoutSettings
+        {
+            PageSize = new SizeF(100, 1000),
+            Margins = new PageMargins(0f),
+            PageGap = 0f,
+            ParagraphSpacing = 0f
+        }, new TextStyle());
         session.Caret.Anchor = new TextPosition(0, 0);
         session.Caret.Position = new TextPosition(0, 5);
 
@@ -247,7 +253,7 @@ internal static class Program
             if (line.ParagraphIndex < s2.ParagraphIndex || line.ParagraphIndex > e2.ParagraphIndex)
                 continue;
             int from = line.ParagraphIndex == s2.ParagraphIndex ? s2.Offset : 0;
-            int to = line.ParagraphIndex == e2.ParagraphIndex ? e2.Offset : doc[e2.ParagraphIndex].Length;
+            int to = line.ParagraphIndex == e2.ParagraphIndex ? e2.Offset : doc[line.ParagraphIndex].Length;
             int a = Math.Max(from, line.Start);
             int b = Math.Min(to, line.End);
             if (b <= a) continue;

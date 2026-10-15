@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("CX2Word.Validation")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+d9df6fdb0837395f85e2a40b6130db85872e32b2")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+8f5af0746ba5babcc03a21072b48972bfcea3661")]
 [assembly: System.Reflection.AssemblyProductAttribute("CX2Word.Validation")]
 [assembly: System.Reflection.AssemblyTitleAttribute("CX2Word.Validation")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

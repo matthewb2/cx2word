@@ -1,5 +1,7 @@
 using System.Drawing;
+using System.Text;
 using System.Windows.Forms;
+using System.Runtime.InteropServices;
 
 namespace CX2Word
 {
@@ -26,12 +28,30 @@ namespace CX2Word
         private const float MaxZoom = 4f;
         private const float ZoomStep = 1.1f;
 
+        // IME (Input Method Editor) support for Korean/other languages
+        private const int WM_IME_COMPOSITION = 0x010F;
+        private const int GCS_COMPSTR = 0x0008;
+        private const int GCS_RESULTSTR = 0x0009;
+
+        [DllImport("imm32.dll")]
+        private static extern IntPtr ImmGetContext(IntPtr hwnd);
+
+        [DllImport("imm32.dll")]
+        private static extern bool ImmReleaseContext(IntPtr hwnd, IntPtr himc);
+
+        [DllImport("imm32.dll", CharSet = CharSet.Unicode)]
+        private static extern int ImmGetCompositionString(IntPtr himc, int dwIndex, StringBuilder lpBuf, int dwBufLen);
+
+        private string _compositionText = string.Empty;
+        private TextPosition _compositionStart = TextPosition.Start;
+
         public Form1()
         {
             InitializeComponent();
 
             KeyPreview = true;
-            Text = "CX2Word - 구조적 워드프로세서";
+            ImeMode = ImeMode.On;
+            Text = "CX2Word - 구조???�드?�로?�서";
             BackColor = Color.FromArgb(0x5F, 0x5F, 0x5F);
 
             _measurer = new DirectWriteTextMeasurer();
@@ -163,6 +183,86 @@ namespace CX2Word
             var layout = _session.Layout;
             float totalHeight = (layout.Pages.Count > 0 ? layout.Pages[^1].Bottom : 0) * _zoom;
             _viewport.AutoScrollMinSize = new Size((int)(_settings.PageSize.Width * _zoom) + 96, (int)(totalHeight + 48));
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == WM_IME_COMPOSITION)
+            {
+                IntPtr himc = ImmGetContext(Handle);
+                if (himc != IntPtr.Zero)
+                {
+                    try
+                    {
+                        int resultLen = ImmGetCompositionString(himc, GCS_RESULTSTR, null, 0);
+                        if (resultLen > 0)
+                        {
+                            int oldLen = _compositionText.Length;
+                            for (int i = 0; i < oldLen; i++)
+                            {
+                                _session.Backspace();
+                            }
+                            StringBuilder resultSb = new StringBuilder(resultLen / 2 + 1);
+                            ImmGetCompositionString(himc, GCS_RESULTSTR, resultSb, resultLen);
+                            string resultText = resultSb.ToString(0, resultLen / 2);
+                            if (!string.IsNullOrEmpty(resultText))
+                            {
+                                _session.InsertText(resultText);
+                            }
+                            _compositionText = string.Empty;
+                            _caretVisible = true;
+                            _viewport.Invalidate();
+                            EnsureCaretVisible();
+                            UpdateStatusBar();
+                            base.WndProc(ref m);
+                            return;
+                        }
+
+                        int compLen2 = ImmGetCompositionString(himc, GCS_COMPSTR, null, 0);
+                        if (compLen2 > 0)
+                        {
+                            StringBuilder compSb = new StringBuilder(compLen2 / 2 + 1);
+                            ImmGetCompositionString(himc, GCS_COMPSTR, compSb, compLen2);
+                            string compText = compSb.ToString(0, compLen2 / 2);
+                            if (compText != _compositionText)
+                            {
+                                int oldLen = _compositionText.Length;
+                                for (int i = 0; i < oldLen; i++)
+                                {
+                                    _session.Backspace();
+                                }
+                                if (!string.IsNullOrEmpty(compText))
+                                {
+                                    _session.InsertText(compText);
+                                }
+                                _compositionText = compText;
+                                _caretVisible = true;
+                                _viewport.Invalidate();
+                                EnsureCaretVisible();
+                            }
+                            base.WndProc(ref m);
+                            return;
+                        }
+                        else if (!string.IsNullOrEmpty(_compositionText))
+                        {
+                            int oldLen = _compositionText.Length;
+                            for (int i = 0; i < oldLen; i++)
+                            {
+                                _session.Backspace();
+                            }
+                            _compositionText = string.Empty;
+                            _caretVisible = true;
+                            _viewport.Invalidate();
+                            EnsureCaretVisible();
+                        }
+                    }
+                    finally
+                    {
+                        ImmReleaseContext(Handle, himc);
+                    }
+                }
+            }
+            base.WndProc(ref m);
         }
 
         /// <summary>Keeps the caret on screen by scrolling the least possible amount.</summary>

@@ -15,6 +15,7 @@ namespace CX2Word
             SetStyle(ControlStyles.Selectable, true);
             TabStop = true;
             DoubleBuffered = false;
+            ImeMode = ImeMode.On;
         }
     }
 }
